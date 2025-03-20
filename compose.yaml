@@ -1,6 +1,7 @@
 services:
   mariadb:
-    image: 'mariadb:11.7-ubi9'
+    # LTS (~ 2029.05)
+    image: 'mariadb:11.4'
     environment:
       - 'MARIADB_DATABASE=vvrite'
       - 'MARIADB_PASSWORD=secret'
