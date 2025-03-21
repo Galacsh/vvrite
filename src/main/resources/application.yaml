@@ -1,1 +1,26 @@
-spring.application.name: vvrite
+spring:
+  application.name: vvrite
+
+server:
+  port: 8080
+
+---
+
+spring:
+  main.banner-mode: off
+  output.ansi.enabled: detect
+  lifecycle.timeout-per-shutdown-phase: 10s
+
+server.error:
+  whitelabel.enabled: false
+  path: "/something-went-wrong"
+
+logging.level:
+  root: info
+
+---
+
+# Import and group profiles
+spring:
+  profiles.active: development
+  # config.import: classpath:config/*.yaml
