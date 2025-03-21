@@ -20,7 +20,7 @@ logging.level:
 
 ---
 
-# Import and group profiles
+# Profile & Imports
 spring:
   profiles.active: development
-  # config.import: classpath:config/*.yaml
+  config.import: classpath:config/actuator.yaml
