@@ -2,6 +2,130 @@
 
 ## 2025-03-20
 
-`spring-boot-docker-compose` 라이브러리는 불편하여 사용하지 않도록 하였습니다. 무엇보다 서버를 재시작할 때마다 연관 컨테이너들이 꺼지고 켜지는 게 생각보다 시간을 잡아먹네요.
+### spring-boot-docker-compose
 
-프로젝트 의존성 버전 관리는 `gradle/libs.versions.toml`을 통해서 진행하도록 변경하였습니다. 추후 멀티 모듈로 변경되더라도 버전을 일관성 있게 관리하기에 좋을 것으로 보여 적용했습니다.
+`spring-boot-docker-compose` 라이브러리는 불편하여 사용하지 않도록 하였습니다. 무엇보다 서버를 재시작할 때마다 연관
+컨테이너들이 꺼지고 켜지는 게 생각보다 시간을 잡아먹네요.
+
+### 프로젝트 의존성 버전 관리
+
+프로젝트 의존성 버전 관리는 `gradle/libs.versions.toml`을 통해서 진행하도록 변경하였습니다. 추후 멀티 모듈로 변경되더라도
+버전을 일관성 있게 관리하기에 좋을 것으로 보여 적용했습니다.
+
+### 에러 처리 - 1
+
+에러가 발생하는 경우 사용자가 Whitelabel 페이지는 좋은 사용 경험이라고 볼 수 없습니다. 사용 경험을 떠나서 설정을 잘못하면
+Stack Trace 등 불필요한 정보가 노출되어 보안적으로도 좋지 않을 수 있습니다. 물론 설정을 잘하면 상관 없지만요.
+
+이러한 이유로 Whitelabel 페이지는 제거하고, 되도록 커스텀 에러 페이지를 제공해야 합니다.
+
+```yaml
+server.error:
+  whitelabel.enabled: false
+```
+
+위와 같이 설정하여 Whitelabel 페이지가 보이지 않도록 설정합니다. 이러면 내장 톰캣의 에러 페이지가 보여지게 되는데, 커스텀
+에러 페이지를 제공하기 위해서는 흔히 다음과 같은 방법 중에 선택하여 진행합니다.
+
+- `BasicErrorController` 사용하기
+- 커스텀 ErrorController 등록하기
+- `@ControllerAdvice` + `@ExceptionHandler`를 이용하는 방법
+- `@Controller` 내 `@ExceptionHandler`를 이용하는 방법
+
+`BasicErrorController`는 커스텀 `ErrorController`를 등록하지 않으면 자동으로 등록되는 Bean 인데,
+
+```java
+
+@Bean
+@ConditionalOnMissingBean(value = ErrorController.class, search = SearchStrategy.CURRENT)
+public BasicErrorController basicErrorController(
+        ErrorAttributes errorAttributes,
+        ObjectProvider<ErrorViewResolver> errorViewResolvers
+) {
+    // ...
+}
+```
+
+기본적으로 Properties 파일의 `server.error.path` (또는 `error.path`)로 요청을 받으면
+`ErrorViewResolver`를 통해 다음 순서로 View 를 찾고 관련 정보를 Model 에 넣어 반환합니다.
+
+1. `/<templates>/error/<status>.<ext>`
+2. `/<static>/error/<status>.html`
+3. `/<templates>/error/<status_prefix e.g. 4xx>.<ext>`
+4. `/<static>/error/<status_prefix e.g. 4xx.html`
+
+커스텀 `ErrorController`는 `ErrorController` 인터페이스를 상속하여 빈으로 등록하면 되는데,
+에러가 너무나 많이 발생하는 서비스라서 이 과정마저 최적화해야 하는게 아니면 `BasicErrorController`를 잘 활용하는게 더
+좋은 방법으로 생각됩니다.
+
+`@ExceptionHandler`의 경우에는 `try-catch` 로직을 기존 코드와 분리하는 개념으로, 다음과 같은 특징을 가집니다.
+
+- `ExceptionHandlerExceptionResolver` 통해서 적합한 핸들러를 찾음
+- 특정 예외에 한정시킬 수 있음
+- 컨트롤러 내에서 작성하면 해당 컨트롤러 범위에서 처리됨
+- `@ControllerAdvice` 를 이용하여 여러 컨트롤러에 걸쳐 공통적으로 사용 가능
+
+따라서, `ErrorController`, `@ControllerAdvice`, `@ExceptionHandler` 모두 함께 사용하여 상황에
+맞는 적절한 에러 처리가 중요합니다.
+
+### 에러 처리 - 2
+
+`mvc.problemdetails.enabled = true` 혹은 `webflux.problemdetails.enabled = 
+true`를 이용해 RFC 7807 표준을 따르는 오류 응답 객체를 기본적으로 반환하게끔 할 수도 있습니다.
+
+저 옵션으로 허용하지 않더라도 `ProblemDetails`를 Response Body 로 반환하면 되지만, 저 옵션을 사용하게 되면 내장
+예외들에 대해서 `ErrorController`의 응답이 아닌 `ProblemDetails`를 반환하게 됩니다.
+
+- 내장 예외 (`ResponseEntityExceptionHandler.handleException` 참고)
+    - `HttpRequestMethodNotSupportedException`,
+    - `HttpMediaTypeNotSupportedException`,
+    - `HttpMediaTypeNotAcceptableException`,
+    - ...
+    - `ErrorResponseException`
+    - ...
+    - `AsyncRequestNotUsableExceptions`
+
+참고로, `mvc.problemdetails.enabled = true` 혹은
+`webflux.problemdetails.enabled = true` 설정 시 자동으로 등록되는 빈인
+`ProblemDetailsExceptionHandler`가 `@ControllerAdvice` +
+`ResponseEntityExceptionHandler` 이므로 `ErrorController` 보다
+우선됩니다.
+
+다만 `ProblemDetailsExceptionHandler`는 404 에러도 `ProblemDetails` 로 반환하므로, 저 같은 경우에는
+API 한정으로 적용될 수 있도록 `mvc.problemdetails.enabled = false` 설정(혹은 제거) 후 다음과 같은
+`ApiExceptionInterceptor`와 `ApiExceptionHandler`를 추가하여 API 용 404와 에러 페이지 404를
+구분하였습니다.
+
+```kotlin
+@ControllerAdvice
+class ApiExceptionInterceptor(val apiExceptionHandler: ApiExceptionHandler) {
+
+    @ExceptionHandler
+    fun handleException(
+        ex: Exception,
+        request: WebRequest
+    ): ResponseEntity<Any>? {
+        if (isApiRequest(request)) {
+            return apiExceptionHandler.handle(ex, request)
+        }
+
+        // API 예외가 아닌 경우 다시 throw 하여 에러 핸들링 체인을 타도록 함
+        throw ex
+    }
+
+    /* 생략 */
+}
+
+@Component
+class ApiExceptionHandler : ResponseEntityExceptionHandler() { /* 생략 */ }
+```
+
+`ResponseEntityExceptionHandler`를 상속하는 핸들러를 굳이 분리한 이유는 다음 2가지 때문입니다.
+
+1. `ResponseEntityExceptionHandler`에 정의된 `@ExceptionHandler`가 404 에러를 내장하고 있기
+   때문에, `@ControllerAdvice`와 붙어버리면 모든 404 에러를 `ProblemDetail`로 반환합니다.
+2. `ResponseEntityExceptionHandler`의 `handleException` 메서드는 오버라이딩이 불가능하여 추가 예외를
+   등록할 수 없습니다.
+
+위 문제를 해결하면서도 `ResponseEntityExceptionHandler`가 주입받아야 하는 `MessageSource` 등을
+정상적으로 주입받으려면 스프링 빈으로 등록되어야 하기 때문에 `@Component` 어노테이션도 필요했습니다.
